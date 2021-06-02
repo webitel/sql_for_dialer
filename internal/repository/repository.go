@@ -128,7 +128,7 @@ func (r mssqlRepo) CdrBulkCreate(ctx context.Context, configs *model.StatisticRe
 		}
 		bulk := mssqlConn.CreateBulk(table, columns)
 		for _, user := range users {
-			var isErr bool = true
+			var isErr = true
 			var errCol string
 			for i, _ := range columns {
 				tmp, isValid, col := getValueHelper(user, configs, i)
