@@ -12,11 +12,12 @@ import (
 )
 
 func main() {
+	fmt.Println("Hello Windows!")
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	cfg, err := LoadConfig()
 	if err != nil {
-		return
+		log.Fatal().Msg(err.Error())
 	}
 	http.HandleFunc("/members", handler.GetMembers)
 	http.HandleFunc("/setMemberInfo", handler.SetMemberStat)
