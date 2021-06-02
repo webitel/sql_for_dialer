@@ -3,10 +3,10 @@ package model
 /* Model for Webitel members request */
 
 type MemberRequest struct {
-	Webitel   Webitel  `json:"webitel,omitempty"`
-	Database  Database `json:"database,omitempty"`
-	Mapping   Mapping  `json:"mapping,omitempty"`
-	Constants []string `json:"constants,omitempty"`
+	Webitel   Webitel           `json:"webitel,omitempty"`
+	Database  Database          `json:"database,omitempty"`
+	Mapping   Mapping           `json:"mapping,omitempty"`
+	Constants map[string]string `json:"constants,omitempty"`
 }
 
 type Webitel struct {
@@ -35,10 +35,10 @@ type Table struct {
 }
 
 type Mapping struct {
-	Name         string   `json:"name,omitempty"`
-	Destinations []string `json:"destinations,omitempty"`
-	PhoneTypes   []string `json:"phoneTypes,omitempty"`
-	Variables    []string `json:"variables,omitempty"`
+	Name         string            `json:"name,omitempty"`
+	Destinations []string          `json:"destinations,omitempty"`
+	PhoneTypes   []string          `json:"phoneTypes,omitempty"`
+	Variables    map[string]string `json:"variables,omitempty"`
 }
 
 /* Model for Webitel statistic request */

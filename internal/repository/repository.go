@@ -51,6 +51,7 @@ type mssqlRepo struct {
 func (r mssqlRepo) PreExecuteQuery(ctx context.Context, query string) (bool, error) {
 	_, err := r.db.QueryContext(ctx, query)
 	if err != nil {
+		log.Err(err).Msg(err.Error())
 		return false, err
 	}
 	return true, nil
@@ -59,6 +60,7 @@ func (r mssqlRepo) PreExecuteQuery(ctx context.Context, query string) (bool, err
 func (r mssqlRepo) AfterExecuteQuery(ctx context.Context, query string) (bool, error) {
 	_, err := r.db.QueryContext(ctx, query)
 	if err != nil {
+		log.Err(err).Msg(err.Error())
 		return false, err
 	}
 	return true, nil
@@ -68,14 +70,17 @@ func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 	//TODO add custom filter
 	query := fmt.Sprintf("select top 2 %s, %s from %s where %s is null %s order by %s asc",
 		primaryColumn, strings.Join(columns, ", "), tableName, importColumn, customFilter, primaryColumn)
+	log.Info().Str("Select query", query)
 	rows, err := r.db.QueryContext(ctx, query, "")
 	if err != nil {
+		log.Err(err).Msg(err.Error())
 		return nil, err
 	}
 	defer rows.Close()
 
 	result := make([]map[string]interface{}, 0)
 	if rows.Err() != nil {
+		log.Err(err).Msg(err.Error())
 		return nil, err
 	}
 
@@ -89,6 +94,7 @@ func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 		}
 		err = rows.Scan(arrPtrs...)
 		if err != nil {
+			log.Err(err).Msg(err.Error())
 			return nil, err
 		}
 		tmp := make(map[string]interface{})
@@ -103,8 +109,10 @@ func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 
 func (r mssqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn string) error {
 	query := fmt.Sprintf("update %s set %s = SYSDATETIME() where %s in (select top 2 %s from %s Where %s is null) ", tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName)
+	log.Info().Str("Update query", query)
 	_, err := r.db.QueryContext(ctx, query, "")
 	if err != nil {
+		log.Err(err).Msg(err.Error())
 		return err
 	}
 	return nil
@@ -179,7 +187,6 @@ func getValueHelper(user *models.EngineAttemptHistory, configs *model.StatisticR
 		if reflect.ValueOf(res).Kind() == reflect.Ptr && reflect.ValueOf(res).IsNil() {
 			res = nil
 		}
-
 		return res, true, ""
 	}
 

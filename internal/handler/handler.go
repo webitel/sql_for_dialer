@@ -21,47 +21,42 @@ import (
 )
 
 func GetMembers(w http.ResponseWriter, req *http.Request) {
-
 	var memberReq []*model.MemberRequest
 	err := json.NewDecoder(req.Body).Decode(&memberReq)
 	if err != nil {
+		log.Err(err).Msg(err.Error())
 		return
 	}
 	defer req.Body.Close()
 	configs := memberReq[0]
-	constants := make(map[string]string)
-	for _, val := range configs.Constants {
-		constants[strings.Split(val, ":")[0]] = strings.Split(val, ":")[1]
-	}
-	variables := make(map[string]string)
-	for _, val := range configs.Mapping.Variables {
-		variables[strings.Split(val, ":")[0]] = strings.Split(val, ":")[1]
-	}
-
 	repo, err := repository.DriverMap[configs.Database.DbType](configs.Database.ConnectionString)
 	if err != nil {
+		log.Err(err).Msg("")
 		return
 	}
 	defer repo.Close()
 	if configs.Database.BeforeExecute != "" {
 		_, err := repo.PreExecuteQuery(req.Context(), configs.Database.BeforeExecute)
 		if err != nil {
+			log.Err(err).Msg("")
 			return
 		}
 	}
 	for {
 		members, err := repo.GetMembers(req.Context(), configs.Database.Table.Columns, configs.Database.Table.Name, configs.Database.Table.PrimaryCol, configs.Database.Table.ImportDateCol, configs.Database.CustomSqlFilter)
 		if err != nil {
+			log.Err(err).Msg("")
 			return
 		}
 
 		if len(members) == 0 {
 			break
 		}
+		log.Info().Str("count", fmt.Sprintf("%v", len(members))).Msg("Rows selected")
 
 		r := httptransport.New(configs.Webitel.Host, configs.Webitel.BasePath, apiclient.DefaultSchemes)
 		r.DefaultAuthentication = httptransport.APIKeyAuth("X-Webitel-Access", "header", configs.Webitel.Token)
-		r.SetDebug(true)
+		//r.SetDebug(true)
 		memberService := member_service.New(r, strfmt.Default)
 
 		webitelItems := make([]*models.EngineCreateMemberBulkItem, 0, len(members))
@@ -72,7 +67,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 				if strings.Contains(configs.Mapping.PhoneTypes[index], "%") {
 					key := strings.Replace(configs.Mapping.PhoneTypes[index], "%", "", 2)
 					phoneType = &models.EngineLookup{
-						ID: constants[key],
+						ID: configs.Constants[key],
 					}
 				} else {
 					phoneType = &models.EngineLookup{
@@ -91,7 +86,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 			webitelItems = append(webitelItems, &models.EngineCreateMemberBulkItem{
 				Communications: communications,
 				Name:           name,
-				Variables:      variables,
+				Variables:      configs.Mapping.Variables,
 			})
 		}
 
@@ -107,11 +102,14 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 		}, r.DefaultAuthentication)
 
 		if err != nil {
+			log.Err(err).Msg("")
 			return
 		}
 		if len(result.GetPayload().Ids) != 0 {
+			log.Info().Str("count", fmt.Sprintf("%v", len(result.GetPayload().Ids))).Msg("Members inserted")
 			err := repo.UpdateMembers(req.Context(), configs.Database.Table.Name, configs.Database.Table.ImportDateCol, configs.Database.Table.PrimaryCol)
 			if err != nil {
+				log.Err(err).Msg("")
 				return
 			}
 		}
