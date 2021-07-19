@@ -10,11 +10,10 @@ type MemberRequest struct {
 }
 
 type Webitel struct {
-	Host     string `json:"host,omitempty"`
-	BasePath string `json:"basePath,omitempty"`
-	Token    string `json:"token,omitempty"`
-	QueueId  int    `json:"queueId,omitempty"`
-
+	Host       string `json:"host,omitempty"`
+	BasePath   string `json:"basePath,omitempty"`
+	Token      string `json:"token,omitempty"`
+	QueueId    int    `json:"queueId,omitempty"`
 	MembersTTL string `json:"membersTTL,omitempty"`
 }
 
