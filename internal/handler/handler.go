@@ -17,7 +17,6 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -92,10 +91,15 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 					}
 				} else {
 					pt := ""
-					if strings.Contains(reflect.TypeOf(item[configs.Mapping.PhoneTypes[index]]).String(), "int") {
-						pt = strconv.FormatInt(item[configs.Mapping.PhoneTypes[index]].(int64), 10)
-					} else {
-						pt = item[configs.Mapping.PhoneTypes[index]].(string)
+					switch v := item[configs.Mapping.PhoneTypes[index]].(type) {
+					case int, int64, int32:
+						pt = fmt.Sprintf("%d", v)
+					case string:
+						pt = fmt.Sprintf("%s", v)
+					case []uint8:
+						pt = fmt.Sprintf("%s", string(v))
+					case time.Time:
+						pt = fmt.Sprintf("%d", v.UnixNano()/int64(time.Millisecond))
 					}
 					phoneType = &models.EngineLookup{
 						ID: pt,
@@ -113,12 +117,18 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 					key := strings.Replace(val, "%", "", 2)
 					vers[i] = key
 				} else {
-					if strings.Contains(reflect.TypeOf(item[val]).String(), "int") {
-						vers[i] = strconv.FormatInt(item[val].(int64), 10)
-					} else {
-						vers[i] = item[val].(string)
+					switch v := item[val].(type) {
+					case int, int64, int32:
+						vers[i] = fmt.Sprintf("%d", v)
+					case string:
+						vers[i] = fmt.Sprintf("%s", v)
+					case []uint8:
+						vers[i] = fmt.Sprintf("%s", string(v))
+					case time.Time:
+						vers[i] = fmt.Sprintf("%d", v.UnixNano()/int64(time.Millisecond))
+					default:
+						vers[i] = ""
 					}
-
 				}
 			}
 
