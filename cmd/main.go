@@ -30,6 +30,7 @@ func main() {
 	http.HandleFunc("/members", handler.GetMembers)
 	http.HandleFunc("/setMemberInfo", handler.SetMemberStat)
 	http.HandleFunc("/version", handler.GetVersion)
+	http.HandleFunc("/logs", handler.GetLogs)
 	log.Info().Str("Port", fmt.Sprintf("%v", cfg.Port)).Msg("Server started")
 	itrlog.Info(fmt.Sprintf("Server started. Port: %v", cfg.Port))
 	if err := http.ListenAndServe(fmt.Sprintf(":%v", cfg.Port), nil); err != nil {

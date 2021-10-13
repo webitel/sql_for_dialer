@@ -51,6 +51,7 @@ type mssqlRepo struct {
 
 func (r mssqlRepo) PreExecuteQuery(ctx context.Context, query string) (bool, error) {
 	_, err := r.db.QueryContext(ctx, query)
+	itrlog.Info("PreExecuteQuery: ", query)
 	if err != nil {
 		itrlog.Error(err.Error())
 		log.Err(err).Msg(err.Error())
@@ -61,6 +62,7 @@ func (r mssqlRepo) PreExecuteQuery(ctx context.Context, query string) (bool, err
 
 func (r mssqlRepo) AfterExecuteQuery(ctx context.Context, query string) (bool, error) {
 	_, err := r.db.QueryContext(ctx, query)
+	itrlog.Info("AfterExecuteQuery: ", query)
 	if err != nil {
 		itrlog.Error(err.Error())
 		log.Err(err).Msg(err.Error())
@@ -74,6 +76,7 @@ func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 	query := fmt.Sprintf("select top 1000 %s, %s from %s where %s is null %s order by %s asc",
 		primaryColumn, strings.Join(columns, ", "), tableName, importColumn, customFilter, primaryColumn)
 	log.Info().Str("Select query", query)
+	itrlog.Info("Select query: ", query)
 	rows, err := r.db.QueryContext(ctx, query, "")
 	if err != nil {
 		itrlog.Error(err.Error())
@@ -115,8 +118,8 @@ func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 
 func (r mssqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn string) error {
 	query := fmt.Sprintf("update %s set %s = SYSDATETIME() where %s in (select top 1000 %s from %s Where %s is null order by %s asc) ", tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, primaryColumn)
-	log.Info().Str("Update query", query)
-	itrlog.Info("Update query", query)
+	log.Info().Str("Update query: ", query)
+	itrlog.Info("Update query: ", query)
 	_, err := r.db.QueryContext(ctx, query, "")
 	if err != nil {
 		itrlog.Error(err.Error())

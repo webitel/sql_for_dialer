@@ -12,22 +12,40 @@ import (
 	"github.com/webitel/sql_for_dialer/internal/model"
 	"github.com/webitel/sql_for_dialer/internal/repository"
 	apiclient "github.com/webitel/sql_for_dialer/internal/webitelClient/client"
+	"github.com/webitel/sql_for_dialer/internal/webitelClient/client/communication_type_service"
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/client/member_service"
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/models"
 	"io"
 	"io/ioutil"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 )
 
+func GetLogs(w http.ResponseWriter, req *http.Request) {
+	currentTime := time.Now()
+	dat, err := ioutil.ReadFile(fmt.Sprintf("logs/get_members_log_%s.log", currentTime.Format("2006-01-02")))
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, "{\n\"error\" : \"file not found\"\n}\n")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	io.WriteString(w, string(dat))
+}
+
 func GetVersion(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	io.WriteString(w, "{\n\"version\" : \"1.0.1\"\n}\n")
+	io.WriteString(w, "{\n\"version\" : \"1.0.7\"\n}\n")
 }
 
 func GetMembers(w http.ResponseWriter, req *http.Request) {
+	defer func() {
+		if r := recover(); r != nil {
+			itrlog.Error(fmt.Sprintf("stacktrace from panic: \n" + string(debug.Stack())))
+		}
+	}()
 	itrlog.SetLogInit(50, 90, "logs", "get_members_log_")
 	var memberReq []*model.MemberRequest
 	err := json.NewDecoder(req.Body).Decode(&memberReq)
@@ -50,6 +68,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 		io.WriteString(w, "{\n\"error\" : \"Unable connect to DB or incorrect connection string\"\n}\n")
 		return
 	}
+	itrlog.Info("Success connection to DB")
 	defer repo.Close()
 	if configs.Database.BeforeExecute != "" {
 		_, err := repo.PreExecuteQuery(req.Context(), configs.Database.BeforeExecute)
@@ -68,6 +87,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 		}
 
 		if len(members) == 0 {
+			itrlog.Info(fmt.Sprintf("Rows selected. Count: %v", len(members)))
 			log.Info().Msg("Count 0")
 			break
 		}
@@ -77,39 +97,72 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 		r := httptransport.New(configs.Webitel.Host, configs.Webitel.BasePath, apiclient.DefaultSchemes)
 		r.DefaultAuthentication = httptransport.APIKeyAuth("X-Webitel-Access", "header", configs.Webitel.Token)
 
-		memberService := member_service.New(r, strfmt.Default)
+		var size int32 = 20
+
+		communicationTypeService := communication_type_service.New(r, strfmt.Default)
+
+		commTypes, err := communicationTypeService.SearchCommunicationType(&communication_type_service.SearchCommunicationTypeParams{
+			Page:    nil,
+			Size:    &size,
+			Context: context.Background(),
+		}, r.DefaultAuthentication)
+
+		if len(commTypes.GetPayload().Items) == 0 {
+			log.Warn().Msg("There is no communication types")
+			itrlog.Warn("There is no communication types")
+		}
+
 		itrlog.Info("Success connection to Webitel")
 		webitelItems := make([]*models.EngineCreateMemberBulkItem, 0, len(members))
 		for _, item := range members {
 			communications := make([]*models.EngineMemberCommunicationCreateRequest, 0, len(configs.Mapping.Destinations))
 			for index, value := range configs.Mapping.Destinations {
-				phoneType := &models.EngineLookup{}
-				if strings.Contains(configs.Mapping.PhoneTypes[index], "%") {
-					key := strings.Replace(configs.Mapping.PhoneTypes[index], "%", "", 2)
-					phoneType = &models.EngineLookup{
-						ID: configs.Constants[key],
-					}
-				} else {
-					pt := ""
-					switch v := item[configs.Mapping.PhoneTypes[index]].(type) {
-					case int, int64, int32:
-						pt = fmt.Sprintf("%d", v)
-					case string:
-						pt = fmt.Sprintf("%s", v)
-					case []uint8:
-						pt = fmt.Sprintf("%s", string(v))
-					case time.Time:
-						pt = fmt.Sprintf("%d", v.UnixNano()/int64(time.Millisecond))
-					}
-					phoneType = &models.EngineLookup{
-						ID: pt,
-					}
+				dest := ""
+				switch v := item[value].(type) {
+				case int, int64, int32:
+					dest = fmt.Sprintf("%d", v)
+				case string:
+					dest = fmt.Sprintf("%s", v)
+				case []uint8:
+					dest = fmt.Sprintf("%s", string(v))
+				case time.Time:
+					dest = fmt.Sprintf("%d", v.UnixNano()/int64(time.Millisecond))
 				}
 
-				communications = append(communications, &models.EngineMemberCommunicationCreateRequest{
-					Destination: item[value].(string),
-					Type:        phoneType,
-				})
+				if dest != "" {
+					phoneType := &models.EngineLookup{}
+					if strings.Contains(configs.Mapping.PhoneTypes[index], "%") {
+						key := strings.Replace(configs.Mapping.PhoneTypes[index], "%", "", 2)
+						phoneType = &models.EngineLookup{
+							ID: configs.Constants[key],
+						}
+					} else {
+						ptCode := ""
+						switch v := item[configs.Mapping.PhoneTypes[index]].(type) {
+						case int, int64, int32:
+							ptCode = fmt.Sprintf("%d", v)
+						case string:
+							ptCode = fmt.Sprintf("%s", v)
+						case []uint8:
+							ptCode = fmt.Sprintf("%s", string(v))
+						case time.Time:
+							ptCode = fmt.Sprintf("%d", v.UnixNano()/int64(time.Millisecond))
+						}
+						ptId := ""
+						for _, item := range commTypes.Payload.Items {
+							if item.Code == ptCode {
+								ptId = item.ID
+							}
+						}
+						phoneType = &models.EngineLookup{
+							ID: ptId,
+						}
+					}
+					communications = append(communications, &models.EngineMemberCommunicationCreateRequest{
+						Destination: dest,
+						Type:        phoneType,
+					})
+				}
 			}
 			vers := make(map[string]string)
 			for i, val := range configs.Mapping.Variables {
@@ -132,9 +185,24 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 				}
 			}
 
-			name, _ := item[configs.Mapping.Name].(string)
+			name := ""
+			switch v := item[configs.Mapping.Name].(type) {
+			case int, int64, int32:
+				name = fmt.Sprintf("%d", v)
+			case string:
+				name = fmt.Sprintf("%s", v)
+			case []uint8:
+				name = fmt.Sprintf("%s", string(v))
+			case time.Time:
+				name = fmt.Sprintf("%d", v.UnixNano()/int64(time.Millisecond))
+			default:
+				name = ""
+			}
 
+			timeToLoad, _ := time.ParseDuration(configs.Webitel.MembersTTL)
+			expireAt := fmt.Sprintf("%d", time.Now().Add(timeToLoad).UnixNano()/int64(time.Millisecond))
 			webitelItems = append(webitelItems, &models.EngineCreateMemberBulkItem{
+				ExpireAt:       expireAt,
 				Communications: communications,
 				Name:           name,
 				Variables:      vers,
@@ -148,6 +216,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 			QueueID: strconv.Itoa(configs.Webitel.QueueId),
 		}
 
+		memberService := member_service.New(r, strfmt.Default)
 		result, err := memberService.CreateMemberBulk(&member_service.CreateMemberBulkParams{
 			Body:    webitelReq,
 			QueueID: strconv.Itoa(configs.Webitel.QueueId),
