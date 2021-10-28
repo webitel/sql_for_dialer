@@ -6,6 +6,7 @@ import (
 	"fmt"
 	_ "github.com/denisenkom/go-mssqldb"
 	mssql "github.com/denisenkom/go-mssqldb"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/itrepablik/itrlog"
 	"github.com/jackc/pgx"
 	_ "github.com/jackc/pgx/v4"
@@ -31,6 +32,7 @@ type Connect func(connString string) (MembersRepository, error)
 var DriverMap = map[string]Connect{
 	"psql":  NewPostgreSQLRepo,
 	"mssql": NewMSSQLRepo,
+	"mysql": NewMySQLRepo,
 }
 
 func NewMSSQLRepo(connString string) (MembersRepository, error) {
@@ -257,5 +259,154 @@ func (r psqlRepo) Close() error {
 }
 
 func (r psqlRepo) CdrBulkCreate(ctx context.Context, configs *model.StatisticRequest, table string, columns []string, users []*models.EngineAttemptHistory) error {
+	return nil
+}
+
+func NewMySQLRepo(connString string) (MembersRepository, error) {
+	db, err := sql.Open("mysql", connString)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+	return mysqlRepo{db}, nil
+}
+
+type mysqlRepo struct {
+	db *sql.DB
+}
+
+func (r mysqlRepo) PreExecuteQuery(ctx context.Context, query string) (bool, error) {
+	_, err := r.db.ExecContext(ctx, query)
+	itrlog.Info("PreExecuteQuery: ", query)
+	if err != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return false, err
+	}
+	return true, nil
+}
+
+func (r mysqlRepo) AfterExecuteQuery(ctx context.Context, query string) (bool, error) {
+	_, err := r.db.ExecContext(ctx, query)
+	itrlog.Info("AfterExecuteQuery: ", query)
+	if err != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return false, err
+	}
+	return true, nil
+}
+
+func (r mysqlRepo) GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter string) ([]map[string]interface{}, error) {
+	query := fmt.Sprintf("select %s, %s from %s where %s is null %s order by %s asc LIMIT 1000",
+		primaryColumn, strings.Join(columns, ", "), tableName, importColumn, customFilter, primaryColumn)
+	log.Info().Str("Select query", query)
+	itrlog.Info("Select query: ", query)
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]map[string]interface{}, 0)
+	if rows.Err() != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return nil, err
+	}
+
+	count := len(columns) + 1
+	for rows.Next() {
+		arr := make([]interface{}, count)
+		arrPtrs := make([]interface{}, count)
+		arrPtrs[0] = &arr[0]
+		for i := range columns {
+			arrPtrs[i+1] = &arr[i+1]
+		}
+		err = rows.Scan(arrPtrs...)
+		if err != nil {
+			itrlog.Error(err.Error())
+			log.Err(err).Msg(err.Error())
+			return nil, err
+		}
+		tmp := make(map[string]interface{})
+		tmp[primaryColumn] = arr[0]
+		for i, col := range columns {
+			tmp[col] = arr[i+1]
+		}
+		result = append(result, tmp)
+	}
+	return result, nil
+}
+
+func (r mysqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn string) error {
+	query := fmt.Sprintf("update %s set %s = current_timestamp where %s in (SELECT * FROM (select %s from %s Where %s is null order by %s asc LIMIT 1000) as sq) ", tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, primaryColumn)
+	log.Info().Str("Update query: ", query)
+	itrlog.Info("Update query: ", query)
+	_, err := r.db.ExecContext(ctx, query)
+	if err != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return err
+	}
+	return nil
+}
+
+func (r mysqlRepo) Close() error {
+	err := r.db.Close()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r mysqlRepo) CdrBulkCreate(ctx context.Context, configs *model.StatisticRequest, table string, columns []string, users []*models.EngineAttemptHistory) error {
+
+	conn, err := r.db.Conn(ctx)
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+	}
+	for _, user := range users {
+		//valueStrings := "(?"+strings.Repeat(",?", len(columns)-1)+")"
+		valueArgs := []string{}
+
+		for i, _ := range columns {
+			tmp, isValid, col := getValueHelper(user, configs, i)
+			if !isValid {
+				itrlog.Warnw("Invalid column name", "Column", col)
+				log.Warn().Str("Column", col).Msg("Invalid column name")
+				return err
+			}
+			if tmp != nil {
+				valueArgs = append(valueArgs, fmt.Sprintf("\"%v\"", tmp))
+			} else {
+				valueArgs = append(valueArgs, "\"\"")
+			}
+		}
+		smt := `INSERT INTO %s(%s) VALUES (%s)`
+		smt = fmt.Sprintf(smt, table, strings.Join(columns, ","), strings.Join(valueArgs, ","))
+
+		_, err = tx.ExecContext(ctx, smt)
+
+		if err != nil {
+			tx.Rollback()
+			itrlog.Error(err.Error())
+			log.Err(err).Msg(err.Error())
+			return err
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return err
+	}
 	return nil
 }

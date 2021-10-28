@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	httptransport "github.com/go-openapi/runtime/client"
@@ -24,6 +25,12 @@ import (
 	"time"
 )
 
+var skipTlsClient = &http.Client{
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
+}
+
 func GetLogs(w http.ResponseWriter, req *http.Request) {
 	currentTime := time.Now()
 	dat, err := ioutil.ReadFile(fmt.Sprintf("logs/get_members_log_%s.log", currentTime.Format("2006-01-02")))
@@ -35,9 +42,9 @@ func GetLogs(w http.ResponseWriter, req *http.Request) {
 	io.WriteString(w, string(dat))
 }
 
-func GetVersion(w http.ResponseWriter, req *http.Request) {
+func GetCurrentVersion(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	io.WriteString(w, "{\n\"version\" : \"1.0.7\"\n}\n")
+	io.WriteString(w, "{\n\"version\" : \"1.0.8\"\n}\n")
 }
 
 func GetMembers(w http.ResponseWriter, req *http.Request) {
@@ -78,6 +85,26 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+	r := httptransport.NewWithClient(configs.Webitel.Host, configs.Webitel.BasePath, apiclient.DefaultSchemes, skipTlsClient)
+	r.DefaultAuthentication = httptransport.APIKeyAuth("X-Webitel-Access", "header", configs.Webitel.Token)
+
+	deleteMemberService := member_service.New(r, strfmt.Default)
+	if configs.Webitel.DeleteMembers {
+		deleteRes, err := deleteMemberService.DeleteMembers(&member_service.DeleteMembersParams{
+			Body:    nil,
+			QueueID: fmt.Sprintf("%v", configs.Webitel.QueueId),
+			Context: context.Background(),
+		}, r.DefaultAuthentication)
+
+		if err != nil {
+			itrlog.Error(fmt.Sprintf("Error on delete members in QueueId: %v. Error: %v", configs.Webitel.QueueId, err.Error()))
+			log.Err(err).Msg(fmt.Sprintf("Error on delete members in QueueId: %v", configs.Webitel.QueueId))
+			return
+		}
+		itrlog.Info(fmt.Sprintf("Success delete %v members in QueueId: %v", len(deleteRes.GetPayload().Items), configs.Webitel.QueueId))
+		log.Info().Msg(fmt.Sprintf("Success delete %v members in QueueId: %v", len(deleteRes.GetPayload().Items), configs.Webitel.QueueId))
+	}
+
 	for {
 		members, err := repo.GetMembers(req.Context(), configs.Database.Table.Columns, configs.Database.Table.Name, configs.Database.Table.PrimaryCol, configs.Database.Table.ImportDateCol, configs.Database.CustomSqlFilter)
 		if err != nil {
@@ -94,9 +121,6 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 		itrlog.Info(fmt.Sprintf("Rows selected. Count: %v", len(members)))
 		log.Info().Str("count", fmt.Sprintf("%v", len(members))).Msg("Rows selected")
 
-		r := httptransport.New(configs.Webitel.Host, configs.Webitel.BasePath, apiclient.DefaultSchemes)
-		r.DefaultAuthentication = httptransport.APIKeyAuth("X-Webitel-Access", "header", configs.Webitel.Token)
-
 		var size int32 = 20
 
 		communicationTypeService := communication_type_service.New(r, strfmt.Default)
@@ -107,12 +131,18 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 			Context: context.Background(),
 		}, r.DefaultAuthentication)
 
+		if err != nil {
+			itrlog.Error(err.Error())
+			log.Err(err).Msg("")
+			return
+		}
 		if len(commTypes.GetPayload().Items) == 0 {
 			log.Warn().Msg("There is no communication types")
 			itrlog.Warn("There is no communication types")
 		}
 
 		itrlog.Info("Success connection to Webitel")
+
 		webitelItems := make([]*models.EngineCreateMemberBulkItem, 0, len(members))
 		for _, item := range members {
 			communications := make([]*models.EngineMemberCommunicationCreateRequest, 0, len(configs.Mapping.Destinations))
@@ -213,13 +243,14 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 
 		webitelReq := &models.EngineCreateMemberBulkRequest{
 			Items:   webitelItems,
-			QueueID: strconv.Itoa(configs.Webitel.QueueId),
+			QueueID: fmt.Sprintf("%v", configs.Webitel.QueueId),
 		}
 
 		memberService := member_service.New(r, strfmt.Default)
+
 		result, err := memberService.CreateMemberBulk(&member_service.CreateMemberBulkParams{
 			Body:    webitelReq,
-			QueueID: strconv.Itoa(configs.Webitel.QueueId),
+			QueueID: fmt.Sprintf("%v", configs.Webitel.QueueId),
 			Context: context.Background(),
 		}, r.DefaultAuthentication)
 
@@ -248,7 +279,6 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
-
 }
 
 func SetMemberStat(w http.ResponseWriter, req *http.Request) {
@@ -268,7 +298,7 @@ func SetMemberStat(w http.ResponseWriter, req *http.Request) {
 	log.Info().Msg(fmt.Sprintf("%q", rdr2))
 	defer req.Body.Close()
 	configs := statsticReq[0]
-	r := httptransport.New(configs.Webitel.Host, configs.Webitel.BasePath, apiclient.DefaultSchemes)
+	r := httptransport.NewWithClient(configs.Webitel.Host, configs.Webitel.BasePath, apiclient.DefaultSchemes, skipTlsClient)
 	r.DefaultAuthentication = httptransport.APIKeyAuth("X-Webitel-Access", "header", configs.Webitel.Token)
 
 	queueId := []string{strconv.Itoa(configs.Webitel.QueueId)}
