@@ -13,6 +13,7 @@ import (
 	"github.com/webitel/sql_for_dialer/internal/model"
 	"github.com/webitel/sql_for_dialer/internal/repository"
 	apiclient "github.com/webitel/sql_for_dialer/internal/webitelClient/client"
+	"github.com/webitel/sql_for_dialer/internal/webitelClient/client/bucket_service"
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/client/communication_type_service"
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/client/member_service"
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/models"
@@ -229,6 +230,41 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 				name = ""
 			}
 
+			bucket := &models.EngineLookup{}
+			bucketName := ""
+			switch v := item[configs.Mapping.Bucket].(type) {
+			case int, int64, int32:
+				bucketName = fmt.Sprintf("%d", v)
+			case string:
+				bucketName = fmt.Sprintf("%s", v)
+			case []uint8:
+				bucketName = fmt.Sprintf("%s", string(v))
+			case time.Time:
+				bucketName = fmt.Sprintf("%d", v.UnixNano()/int64(time.Millisecond))
+			default:
+				bucketName = ""
+			}
+
+			var sizeb int32 = 1
+
+			bucketService := bucket_service.New(r, strfmt.Default)
+
+			buckets, _ := bucketService.SearchBucket(&bucket_service.SearchBucketParams{
+				Q:       &bucketName,
+				Page:    nil,
+				Size:    &sizeb,
+				Context: context.Background(),
+			}, r.DefaultAuthentication)
+			buckId := ""
+			for _, item := range buckets.Payload.Items {
+				if item.Name == bucketName {
+					buckId = item.ID
+				}
+			}
+			bucket = &models.EngineLookup{
+				ID: buckId,
+			}
+
 			timeToLoad, _ := time.ParseDuration(configs.Webitel.MembersTTL)
 			expireAt := fmt.Sprintf("%d", time.Now().Add(timeToLoad).UnixNano()/int64(time.Millisecond))
 			webitelItems = append(webitelItems, &models.EngineCreateMemberBulkItem{
@@ -236,6 +272,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 				Communications: communications,
 				Name:           name,
 				Variables:      vers,
+				Bucket:         bucket,
 			})
 		}
 

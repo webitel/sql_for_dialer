@@ -36,6 +36,7 @@ type Table struct {
 
 type Mapping struct {
 	Name         string            `json:"name,omitempty"`
+	Bucket       string            `json:"bucket,omitempty"`
 	Destinations []string          `json:"destinations,omitempty"`
 	PhoneTypes   []string          `json:"phoneTypes,omitempty"`
 	Variables    map[string]string `json:"variables,omitempty"`
