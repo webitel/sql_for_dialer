@@ -45,7 +45,7 @@ func GetLogs(w http.ResponseWriter, req *http.Request) {
 
 func GetCurrentVersion(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	io.WriteString(w, "{\n\"version\" : \"1.0.8\"\n}\n")
+	io.WriteString(w, "{\n\"version\" : \"1.0.9\"\n}\n")
 }
 
 func GetMembers(w http.ResponseWriter, req *http.Request) {
