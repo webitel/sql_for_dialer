@@ -22,7 +22,7 @@ type MembersRepository interface {
 	PreExecuteQuery(ctx context.Context, query string) (bool, error)
 	AfterExecuteQuery(ctx context.Context, query string) (bool, error)
 	GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter string) ([]map[string]interface{}, error)
-	UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn string) error
+	UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter string) error
 	CdrBulkCreate(ctx context.Context, configs *model.StatisticRequest, table string, columns []string, users []*models.EngineAttemptHistory) error
 	Close() error
 }
@@ -118,8 +118,9 @@ func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 	return result, nil
 }
 
-func (r mssqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn string) error {
-	query := fmt.Sprintf("update %s set %s = SYSDATETIME() where %s in (select top 1000 %s from %s Where %s is null order by %s asc) ", tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, primaryColumn)
+func (r mssqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter string) error {
+	query := fmt.Sprintf("update %s set %s = SYSDATETIME() where %s in (select top 1000 %s from %s Where %s is null %s order by %s asc) ",
+		tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, customFilter, primaryColumn)
 	log.Info().Str("Update query: ", query)
 	itrlog.Info("Update query: ", query)
 	_, err := r.db.QueryContext(ctx, query, "")
@@ -250,7 +251,7 @@ func (r psqlRepo) GetMembers(ctx context.Context, columns []string, tableName, p
 	return nil, nil
 }
 
-func (r psqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn string) error {
+func (r psqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter string) error {
 	return nil
 }
 
@@ -343,8 +344,9 @@ func (r mysqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 	return result, nil
 }
 
-func (r mysqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn string) error {
-	query := fmt.Sprintf("update %s set %s = current_timestamp where %s in (SELECT * FROM (select %s from %s Where %s is null order by %s asc LIMIT 1000) as sq) ", tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, primaryColumn)
+func (r mysqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter string) error {
+	query := fmt.Sprintf("update %s set %s = current_timestamp where %s in (SELECT * FROM (select %s from %s Where %s is null %s order by %s asc LIMIT 1000) as sq) ",
+		tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, customFilter, primaryColumn)
 	log.Info().Str("Update query: ", query)
 	itrlog.Info("Update query: ", query)
 	_, err := r.db.ExecContext(ctx, query)
