@@ -299,7 +299,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 		if len(result.GetPayload().Ids) != 0 {
 			itrlog.Info(fmt.Sprintf("Members inserted. Count: %v", len(result.GetPayload().Ids)))
 			log.Info().Str("count", fmt.Sprintf("%v", len(result.GetPayload().Ids))).Msg("Members inserted")
-			err := repo.UpdateMembers(req.Context(), configs.Database.Table.Name, configs.Database.Table.ImportDateCol, configs.Database.Table.PrimaryCol)
+			err := repo.UpdateMembers(req.Context(), configs.Database.Table.Name, configs.Database.Table.ImportDateCol, configs.Database.Table.PrimaryCol, configs.Database.CustomSqlFilter)
 			if err != nil {
 				itrlog.Error(err.Error())
 				log.Err(err).Msg("")
