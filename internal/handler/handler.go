@@ -6,6 +6,14 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"net/http"
+	"runtime/debug"
+	"strconv"
+	"strings"
+	"time"
+
 	httptransport "github.com/go-openapi/runtime/client"
 	"github.com/go-openapi/strfmt"
 	"github.com/itrepablik/itrlog"
@@ -17,13 +25,6 @@ import (
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/client/communication_type_service"
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/client/member_service"
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/models"
-	"io"
-	"io/ioutil"
-	"net/http"
-	"runtime/debug"
-	"strconv"
-	"strings"
-	"time"
 )
 
 var skipTlsClient = &http.Client{
@@ -67,7 +68,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 	}
 	defer req.Body.Close()
 	configs := memberReq[0]
-	repo, err := repository.DriverMap[configs.Database.DbType](configs.Database.ConnectionString)
+	repo, err := repository.DriverMap[configs.Database.DbType](req.Context(), configs.Database.ConnectionString)
 	if err != nil {
 		itrlog.Error(err.Error())
 		log.Err(err).Msg("Err connection to DB or incorrect connection string")
@@ -107,7 +108,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 	}
 
 	for {
-		members, err := repo.GetMembers(req.Context(), configs.Database.Table.Columns, configs.Database.Table.Name, configs.Database.Table.PrimaryCol, configs.Database.Table.ImportDateCol, configs.Database.CustomSqlFilter)
+		members, err := repo.GetMembers(req.Context(), configs.Database.Table.Columns, configs.Database.Table.Name, configs.Database.Table.PrimaryCol, configs.Database.Table.ImportDateCol, configs.Database.CustomSqlFilter, configs.Database.Table.OrderCol, configs.Database.Table.OrderDir)
 		if err != nil {
 			itrlog.Error(err.Error())
 			log.Err(err).Msg("")
@@ -299,7 +300,7 @@ func GetMembers(w http.ResponseWriter, req *http.Request) {
 		if len(result.GetPayload().Ids) != 0 {
 			itrlog.Info(fmt.Sprintf("Members inserted. Count: %v", len(result.GetPayload().Ids)))
 			log.Info().Str("count", fmt.Sprintf("%v", len(result.GetPayload().Ids))).Msg("Members inserted")
-			err := repo.UpdateMembers(req.Context(), configs.Database.Table.Name, configs.Database.Table.ImportDateCol, configs.Database.Table.PrimaryCol, configs.Database.CustomSqlFilter)
+			err := repo.UpdateMembers(req.Context(), configs.Database.Table.Name, configs.Database.Table.ImportDateCol, configs.Database.Table.PrimaryCol, configs.Database.CustomSqlFilter, configs.Database.Table.OrderCol, configs.Database.Table.OrderDir)
 			if err != nil {
 				itrlog.Error(err.Error())
 				log.Err(err).Msg("")
@@ -347,7 +348,7 @@ func SetMemberStat(w http.ResponseWriter, req *http.Request) {
 	}
 	memberService := member_service.New(r, strfmt.Default)
 	var i int32 = 1
-	repo, err := repository.DriverMap[configs.Database.DbType](configs.Database.ConnectionString)
+	repo, err := repository.DriverMap[configs.Database.DbType](req.Context(), configs.Database.ConnectionString)
 	if err != nil {
 		itrlog.Errorw("Connect to DB", "error", err.Error())
 		log.Err(err).Msg("Connect to DB")

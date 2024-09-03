@@ -32,6 +32,8 @@ type Table struct {
 	Columns       []string `json:"columns,omitempty"`
 	PrimaryCol    string   `json:"primaryCol,omitempty"`
 	ImportDateCol string   `json:"importDateCol,omitempty"`
+	OrderCol      string   `json:"orderCol,omitempty"`
+	OrderDir      string   `json:"orderDir,omitempty"`
 }
 
 type Mapping struct {

@@ -4,30 +4,30 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
+	"strings"
+
 	_ "github.com/denisenkom/go-mssqldb"
 	mssql "github.com/denisenkom/go-mssqldb"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/itrepablik/itrlog"
-	"github.com/jackc/pgx"
-	_ "github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5"
 	_ "github.com/lib/pq"
 	"github.com/rs/zerolog/log"
 	"github.com/webitel/sql_for_dialer/internal/model"
 	"github.com/webitel/sql_for_dialer/internal/webitelClient/models"
-	"reflect"
-	"strings"
 )
 
 type MembersRepository interface {
 	PreExecuteQuery(ctx context.Context, query string) (bool, error)
 	AfterExecuteQuery(ctx context.Context, query string) (bool, error)
-	GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter string) ([]map[string]interface{}, error)
-	UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter string) error
+	GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter, orderColumn, orderDirection string) ([]map[string]interface{}, error)
+	UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter, orderColumn, orderDirection string) error
 	CdrBulkCreate(ctx context.Context, configs *model.StatisticRequest, table string, columns []string, users []*models.EngineAttemptHistory) error
 	Close() error
 }
 
-type Connect func(connString string) (MembersRepository, error)
+type Connect func(ctx context.Context, connString string) (MembersRepository, error)
 
 var DriverMap = map[string]Connect{
 	"psql":  NewPostgreSQLRepo,
@@ -35,7 +35,7 @@ var DriverMap = map[string]Connect{
 	"mysql": NewMySQLRepo,
 }
 
-func NewMSSQLRepo(connString string) (MembersRepository, error) {
+func NewMSSQLRepo(ctx context.Context, connString string) (MembersRepository, error) {
 	db, err := sql.Open("sqlserver", connString)
 	if err != nil {
 		return nil, err
@@ -73,10 +73,9 @@ func (r mssqlRepo) AfterExecuteQuery(ctx context.Context, query string) (bool, e
 	return true, nil
 }
 
-func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter string) ([]map[string]interface{}, error) {
-	//TODO add custom filter
-	query := fmt.Sprintf("select top 1000 %s, %s from %s where %s is null %s order by %s asc",
-		primaryColumn, strings.Join(columns, ", "), tableName, importColumn, customFilter, primaryColumn)
+func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter, orderColumn, orderDirection string) ([]map[string]interface{}, error) {
+	query := fmt.Sprintf("select top 1000 %s, %s from %s where %s is null %s order by %s %s",
+		primaryColumn, strings.Join(columns, ", "), tableName, importColumn, customFilter, orderColumn, orderDirection)
 	log.Info().Str("Select query", query)
 	itrlog.Info("Select query: ", query)
 	rows, err := r.db.QueryContext(ctx, query, "")
@@ -118,9 +117,9 @@ func (r mssqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 	return result, nil
 }
 
-func (r mssqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter string) error {
-	query := fmt.Sprintf("update %s set %s = SYSDATETIME() where %s in (select top 1000 %s from %s Where %s is null %s order by %s asc) ",
-		tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, customFilter, primaryColumn)
+func (r mssqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter, orderColumn, orderDirection string) error {
+	query := fmt.Sprintf("update %s set %s = SYSDATETIME() where %s in (select top 1000 %s from %s Where %s is null %s order by %s %s) ",
+		tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, customFilter, orderColumn, orderDirection)
 	log.Info().Str("Update query: ", query)
 	itrlog.Info("Update query: ", query)
 	_, err := r.db.QueryContext(ctx, query, "")
@@ -212,9 +211,8 @@ func getValueHelper(user *models.EngineAttemptHistory, configs *model.StatisticR
 	return reflect.Indirect(reflect.ValueOf(user)).FieldByName(configs.Mapping[configs.Database.Table.Columns[i]]).Interface(), true, ""
 }
 
-func NewPostgreSQLRepo(connString string) (MembersRepository, error) {
-	dbConn, _ := pgx.ParseConnectionString(connString)
-	db, err := pgx.Connect(dbConn)
+func NewPostgreSQLRepo(ctx context.Context, connString string) (MembersRepository, error) {
+	db, err := pgx.Connect(ctx, connString)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +227,7 @@ type psqlRepo struct {
 }
 
 func (r psqlRepo) PreExecuteQuery(ctx context.Context, query string) (bool, error) {
-	err := r.db.QueryRow(query).Scan()
+	_, err := r.db.Query(ctx, query)
 	if err != nil {
 		return false, err
 	}
@@ -237,21 +235,67 @@ func (r psqlRepo) PreExecuteQuery(ctx context.Context, query string) (bool, erro
 }
 
 func (r psqlRepo) AfterExecuteQuery(ctx context.Context, query string) (bool, error) {
-	err := r.db.QueryRow(query).Scan()
+	_, err := r.db.Query(ctx, query)
 	if err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (r psqlRepo) GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter string) ([]map[string]interface{}, error) {
-	query := fmt.Sprintf("select %s, %s from %s where %s IS NULL;", primaryColumn, strings.Join(columns, ", "), tableName, importColumn)
+func (r psqlRepo) GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter, orderColumn, orderDirection string) ([]map[string]interface{}, error) {
+	query := fmt.Sprintf("select %s, %s from %s where %s IS NULL ORDER BY %s %s LIMIT 1000;", primaryColumn, strings.Join(columns, ", "), tableName, importColumn, orderColumn, orderDirection)
+	log.Info().Str("Select query", query)
+	itrlog.Info("Select query: ", query)
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return nil, err
+	}
+	defer rows.Close()
 
-	r.db.QueryRow(query).Scan()
-	return nil, nil
+	result := make([]map[string]interface{}, 0)
+	if rows.Err() != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return nil, err
+	}
+
+	count := len(columns) + 1
+	for rows.Next() {
+		arr := make([]interface{}, count)
+		arrPtrs := make([]interface{}, count)
+		arrPtrs[0] = &arr[0]
+		for i := range columns {
+			arrPtrs[i+1] = &arr[i+1]
+		}
+		err = rows.Scan(arrPtrs...)
+		if err != nil {
+			itrlog.Error(err.Error())
+			log.Err(err).Msg(err.Error())
+			return nil, err
+		}
+		tmp := make(map[string]interface{})
+		tmp[primaryColumn] = arr[0]
+		for i, col := range columns {
+			tmp[col] = arr[i+1]
+		}
+		result = append(result, tmp)
+	}
+	return result, nil
 }
 
-func (r psqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter string) error {
+func (r psqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter, orderColumn, orderDirection string) error {
+	query := fmt.Sprintf("update %s set %s = CURRENT_TIMESTAMP where %s in (select %s from %s Where %s is null %s order by %s %s LIMIT 1000) ",
+		tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, customFilter, orderColumn, orderDirection)
+	log.Info().Str("Update query: ", query)
+	itrlog.Info("Update query: ", query)
+	_, err := r.db.Query(ctx, query)
+	if err != nil {
+		itrlog.Error(err.Error())
+		log.Err(err).Msg(err.Error())
+		return err
+	}
 	return nil
 }
 
@@ -263,7 +307,7 @@ func (r psqlRepo) CdrBulkCreate(ctx context.Context, configs *model.StatisticReq
 	return nil
 }
 
-func NewMySQLRepo(connString string) (MembersRepository, error) {
+func NewMySQLRepo(ctx context.Context, connString string) (MembersRepository, error) {
 	db, err := sql.Open("mysql", connString)
 	if err != nil {
 		return nil, err
@@ -300,9 +344,9 @@ func (r mysqlRepo) AfterExecuteQuery(ctx context.Context, query string) (bool, e
 	return true, nil
 }
 
-func (r mysqlRepo) GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter string) ([]map[string]interface{}, error) {
-	query := fmt.Sprintf("select %s, %s from %s where %s is null %s order by %s asc LIMIT 1000",
-		primaryColumn, strings.Join(columns, ", "), tableName, importColumn, customFilter, primaryColumn)
+func (r mysqlRepo) GetMembers(ctx context.Context, columns []string, tableName, primaryColumn, importColumn, customFilter, orderColumn, orderDirection string) ([]map[string]interface{}, error) {
+	query := fmt.Sprintf("select %s, %s from %s where %s is null %s order by %s %s LIMIT 1000",
+		primaryColumn, strings.Join(columns, ", "), tableName, importColumn, customFilter, orderColumn, orderDirection)
 	log.Info().Str("Select query", query)
 	itrlog.Info("Select query: ", query)
 	rows, err := r.db.QueryContext(ctx, query)
@@ -344,9 +388,9 @@ func (r mysqlRepo) GetMembers(ctx context.Context, columns []string, tableName, 
 	return result, nil
 }
 
-func (r mysqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter string) error {
-	query := fmt.Sprintf("update %s set %s = current_timestamp where %s in (SELECT * FROM (select %s from %s Where %s is null %s order by %s asc LIMIT 1000) as sq) ",
-		tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, customFilter, primaryColumn)
+func (r mysqlRepo) UpdateMembers(ctx context.Context, tableName, updateColumnName, primaryColumn, customFilter, orderColumn, orderDirection string) error {
+	query := fmt.Sprintf("update %s set %s = current_timestamp where %s in (SELECT * FROM (select %s from %s Where %s is null %s order by %s %s LIMIT 1000) as sq) ",
+		tableName, updateColumnName, primaryColumn, primaryColumn, tableName, updateColumnName, customFilter, orderColumn, orderDirection)
 	log.Info().Str("Update query: ", query)
 	itrlog.Info("Update query: ", query)
 	_, err := r.db.ExecContext(ctx, query)
